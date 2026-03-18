@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>Quiz Firebase</title>
+
+<style>
+body{font-family:Arial;background:#f0f2f5;text-align:center;}
+
+.box{
+    width:900px;
+    margin:auto;
+    background:white;
+    padding:20px;
+    margin-top:20px;
+    border-radius:10px;
+    text-align:left;
+}
+
+.option{
+    padding:10px;
+    margin:8px 0;
+    background:#eee;
+    border-radius:6px;
+}
+
+.correct{background:green!important;color:white;}
+.wrong{background:red!important;color:white;}
+
+.locked{pointer-events:none;opacity:0.7;}
+.hidden{display:none;}
+
+button,input{padding:8px;margin:4px;}
+.list-item{
+    border:1px solid #ddd;
+    padding:10px;
+    margin:5px 0;
+    border-radius:6px;
+}
+</style>
+</head>
+
+<body>
+
+<!-- HOME -->
+<div class="box" id="home">
+<h2>QUIZ</h2>
+
+<input id="playerName" placeholder="Nhập tên">
+<button onclick="start()">Bắt đầu</button>
+
+<hr>
+
+<button onclick="openLogin()">🔐 Đăng nhập</button>
+
+<div id="adminPanel" class="hidden">
+<button onclick="openForm()">➕ Thêm câu hỏi</button>
+<button onclick="openManager()">📋 Quản lý câu hỏi</button>
+<p>📊 Tổng câu: <b id="totalQ">0</b></p>
+</div>
+</div>
+
+<!-- LOGIN -->
+<div id="loginBox" class="hidden box">
+<h3>Đăng nhập</h3>
+<input id="user" placeholder="Tài khoản">
+<input id="pass" type="password" placeholder="Mật khẩu">
+<button onclick="login()">Đăng nhập</button>
+<button onclick="closeLogin()">Đóng</button>
+<p id="loginMsg"></p>
+</div>
+
+<!-- FORM -->
+<div id="formBox" class="hidden box">
+<h3>Thêm/Sửa câu hỏi</h3>
+
+<input id="newQ" placeholder="Nhập câu hỏi">
+
+<input id="a"><label><input type="checkbox" id="aTrue"> A đúng</label><br>
+<input id="b"><label><input type="checkbox" id="bTrue"> B đúng</label><br>
+<input id="c"><label><input type="checkbox" id="cTrue"> C đúng</label><br>
+<input id="d"><label><input type="checkbox" id="dTrue"> D đúng</label><br>
+
+<button onclick="saveQuestion()">Lưu</button>
+<button onclick="closeForm()">Đóng</button>
+
+<p id="msg"></p>
+</div>
+
+<!-- MANAGER -->
+<div id="manager" class="hidden box">
+<h3>Danh sách câu hỏi</h3>
+<div id="listQ"></div>
+<button onclick="closeManager()">Đóng</button>
+</div>
+
+<!-- QUIZ -->
+<div class="box hidden" id="quiz">
+<h3 id="q"></h3>
+<div id="ops"></div>
+
+<button onclick="submitAnswer()">Nộp bài</button>
+<button onclick="next()">Câu tiếp</button>
+
+<p id="rs"></p>
+</div>
+
+<script type="module">
+
+// ===== FIREBASE =====
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc } 
+from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC3GS848HAMDlrpuIFazWft4bYLIlh5zi0",
+  authDomain: "hihi-71a72.firebaseapp.com",
+  projectId: "hihi-71a72",
+  storageBucket: "hihi-71a72.firebasestorage.app",
+  messagingSenderId: "892366808361",
+  appId: "1:892366808361:web:a189b4d70d1290c5714338",
+  measurementId: "G-32C8B083B3"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// ===== LOGIN =====
+let isAdmin=false;
+
+window.openLogin=()=>loginBox.classList.remove("hidden");
+window.closeLogin=()=>loginBox.classList.add("hidden");
+
+window.login=()=>{
+if(user.value==="admin" && pass.value==="123"){
+    isAdmin=true;
+    adminPanel.classList.remove("hidden");
+    loginBox.classList.add("hidden");
+}else{
+    loginMsg.innerText="Sai tài khoản!";
+}
+};
+
+// ===== DATA =====
+let questions=[];
+let editIndex=-1;
+
+let list=[],i=0,score=0,total=0;
+let submitted=false;
+
+function shuffle(a){return a.sort(()=>Math.random()-0.5);}
+
+// ===== FIREBASE LOAD =====
+async function loadQuestions(){
+    questions=[];
+    const snapshot = await getDocs(collection(db,"questions"));
+
+    snapshot.forEach(docSnap=>{
+        questions.push({
+            id: docSnap.id,
+            ...docSnap.data()
+        });
+    });
+
+    renderList();
+    updateCount();
+}
+
+// ===== FORM =====
+window.openForm=()=>{
+    if(!isAdmin)return alert("Không có quyền!");
+    formBox.classList.remove("hidden");
+};
+window.closeForm=()=>formBox.classList.add("hidden");
+
+// ===== SAVE =====
+window.saveQuestion=async()=>{
+
+let q=newQ.value;
+let A=a.value,B=b.value,C=c.value,D=d.value;
+
+if(!q||!A||!B||!C||!D){
+    msg.innerText="Nhập đầy đủ!";
+    return;
+}
+
+let obj={
+q:q,
+options:[
+{text:"a. "+A,correct:aTrue.checked},
+{text:"b. "+B,correct:bTrue.checked},
+{text:"c. "+C,correct:cTrue.checked},
+{text:"d. "+D,correct:dTrue.checked}
+]
+};
+
+if(editIndex==-1){
+    await addDoc(collection(db,"questions"),obj);
+}else{
+    await updateDoc(doc(db,"questions",questions[editIndex].id),obj);
+}
+
+msg.innerText="✅ Đã lưu!";
+
+newQ.value="";
+a.value=b.value=c.value=d.value="";
+aTrue.checked=bTrue.checked=cTrue.checked=dTrue.checked=false;
+
+editIndex=-1;
+loadQuestions();
+};
+
+// ===== MANAGER =====
+window.openManager=()=>{
+    if(!isAdmin)return;
+    manager.classList.remove("hidden");
+    renderList();
+};
+window.closeManager=()=>manager.classList.add("hidden");
+
+function renderList(){
+listQ.innerHTML="";
+
+questions.forEach((q,idx)=>{
+let div=document.createElement("div");
+div.className="list-item";
+
+div.innerHTML=`
+<b>${idx+1}. ${q.q}</b><br>
+<button onclick="editQ(${idx})">Sửa</button>
+<button onclick="deleteQ(${idx})">Xoá</button>
+`;
+
+listQ.appendChild(div);
+});
+
+updateCount();
+}
+
+window.deleteQ=async(i)=>{
+if(confirm("Xoá câu này?")){
+    await deleteDoc(doc(db,"questions",questions[i].id));
+    loadQuestions();
+}
+};
+
+window.editQ=(i)=>{
+let q=questions[i];
+
+newQ.value=q.q;
+a.value=q.options[0].text.slice(3);
+b.value=q.options[1].text.slice(3);
+c.value=q.options[2].text.slice(3);
+d.value=q.options[3].text.slice(3);
+
+aTrue.checked=q.options[0].correct;
+bTrue.checked=q.options[1].correct;
+cTrue.checked=q.options[2].correct;
+dTrue.checked=q.options[3].correct;
+
+editIndex=i;
+openForm();
+};
+
+function updateCount(){
+totalQ.innerText=questions.length;
+}
+
+// ===== QUIZ =====
+window.start=()=>{
+
+let name=playerName.value;
+if(!name)return alert("Nhập tên!");
+
+if(questions.length===0){
+alert("Chưa có câu hỏi!");
+return;
+}
+
+list=shuffle(questions).map(q=>({...q,options:shuffle(q.options)}));
+
+home.classList.add("hidden");
+quiz.classList.remove("hidden");
+
+load();
+};
+
+function load(){
+
+submitted=false;
+
+let q=list[i];
+document.getElementById("q").innerText=q.q;
+
+let html="";
+q.options.forEach((op,idx)=>{
+html+=`
+<div class="option" id="op${idx}">
+<b>${op.text}</b><br>
+<label><input type="radio" name="q${idx}" value="true"> Đúng</label>
+<label><input type="radio" name="q${idx}" value="false"> Sai</label>
+</div>`;
+});
+
+ops.innerHTML=html;
+}
+
+window.submitAnswer=()=>{
+
+if(submitted) return;
+submitted=true;
+
+let q=list[i];
+
+q.options.forEach((op,idx)=>{
+let sel=document.querySelector(`input[name=q${idx}]:checked`);
+let div=document.getElementById("op"+idx);
+
+div.classList.add("locked");
+
+if(!sel) return;
+
+let ans=sel.value==="true";
+
+if(ans===op.correct){
+div.classList.add("correct");
+score++;
+}else{
+div.classList.add("wrong");
+}
+
+total++;
+});
+
+rs.innerText=`${score}/${total}`;
+};
+
+window.next=()=>{
+
+if(!submitted){
+alert("Hãy nộp bài trước!");
+return;
+}
+
+i++;
+
+if(i>=list.length){
+alert(`Kết quả: ${score}/${total}`);
+location.reload();
+return;
+}
+
+load();
+};
+
+// ===== INIT =====
+loadQuestions();
+
+</script>
+
+</body>
+</html>
